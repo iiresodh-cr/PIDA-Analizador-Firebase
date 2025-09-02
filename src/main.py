@@ -21,12 +21,21 @@ load_dotenv()
 
 # --- SECCIÓN DE CONFIGURACIÓN MODIFICADA PARA EL SDK ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# --- INICIO: CÓDIGO DE DEPURACIÓN (TEMPORAL) ---
+if GEMINI_API_KEY:
+    # Imprimimos información clave para depurar sin exponer la clave completa
+    print(f"DEBUG: Verificando API Key. Longitud: {len(GEMINI_API_KEY)}, Primeros 5: '{GEMINI_API_KEY[:5]}', Últimos 5: '{GEMINI_API_KEY[-5:]}'")
+else:
+    print("DEBUG: La variable de entorno GEMINI_API_KEY no fue encontrada.")
+# --- FIN: CÓDIGO DE DEPURACIÓN ---
+
 if not GEMINI_API_KEY:
     raise ValueError("No se encontró la variable de entorno GEMINI_API_KEY")
 
 # Configura el SDK de Google
 genai.configure(api_key=GEMINI_API_KEY)
-# --- FIN DE LA MODIFICACIÓN ---
+
 
 app = FastAPI(title="PIDA Document Analyzer API")
 
@@ -73,14 +82,13 @@ class PDF(FPDF):
         self.set_text_color(128, 128, 128)
         self.cell(0, 10, f"Página {self.page_no()}/{{nb}}", 0, 0, "C")
 
-# --- FUNCIÓN DE ANÁLISIS REFACTORIZADA CON EL SDK ---
 @app.post("/analyze-documents")
 async def analyze_documents(files: List[UploadFile] = File(...), instructions: str = Form(...)):
     if len(files) > 5:
         raise HTTPException(status_code=400, detail="Se permite un máximo de 5 archivos.")
 
-    # 1. Configuración del modelo y parámetros
-    gemini_model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    # 1. Configuración del modelo y parámetros (Modelo por defecto actualizado)
+    gemini_model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     temperature = float(os.getenv("GEMINI_TEMP", 0.3))
     top_p = float(os.getenv("GEMINI_TOP_P", 0.95))
 
