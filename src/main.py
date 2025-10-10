@@ -1,12 +1,14 @@
+# iiresodh-cr/pida-analizador-firebase/PIDA-Analizador-Firebase-67be5ff9100701269c8f54a3f74472d282a8351a/src/main.py
+
 import os
 import base64
 import requests
 import json
 import io
 import re
-from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Response
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List
+from typing import List, Dict, Any
 from dotenv import load_dotenv
 from docx import Document
 from docx.shared import Pt
@@ -14,6 +16,8 @@ from fpdf import FPDF
 from markdown_it import MarkdownIt
 from datetime import datetime
 
+# Importa el "portero" de seguridad
+from src.core.security import get_current_user
 from src.core.prompts import ANALYZER_SYSTEM_PROMPT
 
 # Cargar variables de entorno
@@ -23,7 +27,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise ValueError("No se encontró la variable de entorno GEMINI_API_KEY")
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash") # Modelo actualizado
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
 app = FastAPI(title="PIDA Document Analyzer API")
@@ -55,31 +59,40 @@ def parse_and_add_markdown_to_docx(document, markdown_text):
 
 class PDF(FPDF):
     def header(self):
-        self.add_font("NotoSans", "", "fonts/NotoSans-Regular.ttf", uni=True)
-        self.add_font("NotoSans", "B", "fonts/NotoSans-Bold.ttf", uni=True)
-        self.add_font("NotoSans", "I", "fonts/NotoSans-Italic.ttf", uni=True)
-        self.set_font("NotoSans", "B", 15)
+        # Asegúrate de que la carpeta 'fonts' y los archivos .ttf estén presentes
+        # en la raíz de tu servicio o ajusta la ruta.
+        try:
+            self.add_font("NotoSans", "", "fonts/NotoSans-Regular.ttf", uni=True)
+            self.add_font("NotoSans", "B", "fonts/NotoSans-Bold.ttf", uni=True)
+            self.add_font("NotoSans", "I", "fonts/NotoSans-Italic.ttf", uni=True)
+            self.set_font("NotoSans", "B", 15)
+        except RuntimeError:
+            print("Warning: Fuentes NotoSans no encontradas. Usando Arial.")
+            self.set_font("Arial", "B", 15)
+
         self.set_text_color(29, 53, 87)
         self.cell(0, 10, "PIDA-AI: Resumen de Consulta", 0, 1, "L")
-        self.set_font("NotoSans", "", 10)
+        self.set_font("NotoSans" if self.font_family == "NotoSans" else "Arial", "", 10)
         self.set_text_color(128, 128, 128)
         self.cell(0, 10, f"Generado: {datetime.now().strftime('%d/%m/%Y, %H:%M:%S')}", 0, 1, "L")
         self.ln(5)
 
     def footer(self):
         self.set_y(-15)
-        self.set_font("NotoSans", "", 8)
+        self.set_font("NotoSans" if self.font_family == "NotoSans" else "Arial", "", 8)
         self.set_text_color(128, 128, 128)
         self.cell(0, 10, f"Página {self.page_no()}/{{nb}}", 0, 0, "C")
 
 @app.post("/analyze-documents")
-async def analyze_documents(files: List[UploadFile] = File(...), instructions: str = Form(...)):
+async def analyze_documents(
+    files: List[UploadFile] = File(...), 
+    instructions: str = Form(...),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    print(f"Petición de análisis recibida del usuario UID: {current_user.get('uid')}")
     if len(files) > 3:
         raise HTTPException(status_code=400, detail="Se permite un máximo de 3 archivos.")
     
-    # --- INICIO DE LA MODIFICACIÓN ---
-    
-    # Definimos los tipos de archivo que SÍ aceptamos. Excluimos 'application/msword'.
     supported_mime_types = ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
     
     file_parts = []
@@ -89,33 +102,23 @@ async def analyze_documents(files: List[UploadFile] = File(...), instructions: s
         
         contents = await file.read()
 
-        # Si el archivo es un DOCX, extraemos su texto.
         if file.content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
             try:
                 doc_stream = io.BytesIO(contents)
                 document = Document(doc_stream)
                 full_text = "\n".join([para.text for para in document.paragraphs])
-                
-                # Enviamos el texto extraído en lugar del archivo
                 file_parts.append({"text": f"--- INICIO DEL DOCUMENTO '{file.filename}' ---\n\n{full_text}\n\n--- FIN DEL DOCUMENTO '{file.filename}' ---"})
             except Exception as e:
-                # Si el DOCX está corrupto o no se puede leer, lanzamos un error
                 raise HTTPException(status_code=400, detail=f"No se pudo procesar el archivo DOCX '{file.filename}': {e}")
         else:
-            # Para PDF y otros formatos futuros, usamos el método original
             encoded_contents = base64.b64encode(contents).decode("utf-8")
             file_parts.append({"inline_data": {"mime_type": file.content_type, "data": encoded_contents}})
             
-    # --- FIN DE LA MODIFICACIÓN ---
-    
     prompt_parts = [*file_parts, {"text": f"\n--- \nInstrucciones del Usuario: {instructions}"}]
 
     temperature = float(os.getenv("GEMINI_TEMP", 0.3))
     top_p = float(os.getenv("GEMINI_TOP_P", 0.95))
-    generation_config = {
-        "temperature": temperature,
-        "topP": top_p
-    }
+    generation_config = {"temperature": temperature, "topP": top_p}
 
     request_payload = {
         "contents": [{"parts": prompt_parts}],
@@ -149,25 +152,22 @@ async def analyze_documents(files: List[UploadFile] = File(...), instructions: s
 async def download_analysis(
     analysis_text: str = Form(...),
     instructions: str = Form(...),
-    file_format: str = Form("docx")
+    file_format: str = Form("docx"),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
+    print(f"Petición de descarga recibida del usuario UID: {current_user.get('uid')}")
     try:
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         file_stream = io.BytesIO()
 
         if file_format.lower() == "docx":
             document = Document()
-            
             style = document.styles['Normal']
             font = style.font
             font.name = 'Noto Sans'
             font.size = Pt(11)
-
-            style_h1 = document.styles['Heading 1']
-            style_h1.font.name = 'Noto Sans'
-            
-            style_h2 = document.styles['Heading 2']
-            style_h2.font.name = 'Noto Sans'
+            document.styles['Heading 1'].font.name = 'Noto Sans'
+            document.styles['Heading 2'].font.name = 'Noto Sans'
 
             document.add_heading("PIDA-AI: Resumen de Consulta", level=1)
             document.add_paragraph(f"Generado: {datetime.now().strftime('%d/%m/%Y, %H:%M:%S')}")
@@ -179,7 +179,7 @@ async def download_analysis(
 
             document.save(file_stream)
             media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            filename = f"PIDA-AI-Analisis - {timestamp}.docx"
+            filename = f"PIDA-AI-Analisis-{timestamp}.docx"
         else: # pdf
             pdf = PDF()
             pdf.alias_nb_pages()
@@ -198,16 +198,16 @@ async def download_analysis(
             pdf.cell(0, 10, "Respuesta de PIDA-AI", 0, 1, "L")
             
             md = MarkdownIt()
-            html_content = md.render(analysis_text).replace('<h2>', '<h2><font color="#1D3557">').replace('</h2>', '</font></h2>').replace('<i>', '').replace('</i>', '').replace('<em>', '').replace('</em>', '')
+            html_content = md.render(analysis_text)
             
             pdf.set_font("NotoSans", "", 11)
             pdf.set_text_color(0, 0, 0)
             pdf.write_html(html_content)
             
-            pdf_output = pdf.output()
+            pdf_output = pdf.output(dest='S').encode('latin1')
             file_stream.write(pdf_output)
             media_type = "application/pdf"
-            filename = f"PIDA-AI-Analisis - {timestamp}.pdf"
+            filename = f"PIDA-AI-Analisis-{timestamp}.pdf"
 
         file_stream.seek(0)
         return Response(
