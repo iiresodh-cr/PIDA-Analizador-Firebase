@@ -7,3 +7,4 @@ fpdf2
 markdown-it-py
 firebase-admin
 python-multipart
+google-cloud-firestore
