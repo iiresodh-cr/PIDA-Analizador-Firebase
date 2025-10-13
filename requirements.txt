@@ -1,9 +1,8 @@
-fastapi==0.111.0
-uvicorn[standard]==0.29.0
-python-dotenv==1.0.1
-python-multipart==0.0.9
-requests==2.32.3
-python-docx==1.1.2
-fpdf2==2.7.8
-markdown-it-py==3.0.0
-firebase-admin==6.5.0
+fastapi
+uvicorn[standard]
+firebase-admin
+python-docx
+fpdf2
+markdown
+PyMuPDF
+google-cloud-aiplatform
