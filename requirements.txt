@@ -1,8 +1,8 @@
 fastapi
 uvicorn[standard]
-firebase-admin
+python-dotenv
+requests
 python-docx
 fpdf2
-markdown
-PyMuPDF
-google-cloud-aiplatform
+markdown-it-py
+firebase-admin
