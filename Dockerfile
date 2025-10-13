@@ -11,20 +11,7 @@ WORKDIR /app
 # Añade el directorio de trabajo a la ruta de búsqueda de Python.
 ENV PYTHONPATH=/app
 
-# --- INICIO DE LA MODIFICACIÓN ---
-# Instala las dependencias del sistema operativo ANTES de cualquier otra operación.
-# Esto se ejecuta como root y es crucial para que pip pueda instalar paquetes
-# complejos como PyMuPDF de forma rápida y sin errores.
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    pkg-config \
-    swig \
-    libffi-dev \
-    --no-install-recommends && \
-    rm -rf /var/lib/apt/lists/*
-# --- FIN DE LA MODIFICACIÓN ---
-
-# Crea un usuario no-root por seguridad (Tu código original, se mantiene)
+# Crea un usuario no-root por seguridad
 RUN addgroup --system app && adduser --system --group app
 
 # Actualiza pip
@@ -34,7 +21,8 @@ RUN pip install --upgrade pip
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia TODO el código de tu proyecto al contenedor, manteniendo la estructura
+# Copia TODO el código de tu proyecto al contenedor
+# Esto incluye la carpeta 'src' y la carpeta 'fonts'
 COPY . .
 
 # Dale la propiedad de los archivos al usuario no-root
