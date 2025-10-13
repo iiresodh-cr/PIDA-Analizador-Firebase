@@ -89,7 +89,7 @@ class PDF(FPDF):
         self.set_text_color(128, 128, 128)
         self.cell(0, 10, f"Página {self.page_no()}/{{nb}}", 0, 0, "C")
 
-@app.post("/analyze-documents")
+@app.post("/analyze/")
 async def analyze_documents(
     files: List[UploadFile] = File(...), 
     instructions: str = Form(...),
