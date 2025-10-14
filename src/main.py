@@ -38,7 +38,6 @@ db = firestore.Client()
 
 app = FastAPI(title="PIDA Document Analyzer API")
 
-# --- INICIO DE LA ÚNICA MODIFICACIÓN ---
 # Se especifica el origen correcto para mayor seguridad.
 origins = [
     "https://pida-ai.com"
@@ -47,12 +46,37 @@ origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,  # <-- AÑADIR ESTA LÍNEA
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],
 )
-# --- FIN DE LA ÚNICA MODIFICACIÓN ---
+
+# --- INICIO DE LA MODIFICACIÓN: FUNCIÓN DE VERIFICACIÓN DE SUSCRIPCIÓN ---
+
+def verify_active_subscription(user_id: str):
+    """
+    Verifica en Firestore si un usuario tiene una suscripción activa o en período de prueba.
+    Lanza una excepción HTTP 403 si no se encuentra ninguna suscripción válida.
+    """
+    try:
+        subscriptions_ref = db.collection("customers").document(user_id).collection("subscriptions")
+        query = subscriptions_ref.where("status", "in", ["active", "trialing"]).limit(1)
+        results = list(query.get())
+
+        if not results:
+            raise HTTPException(status_code=403, detail="No tienes una suscripción activa o un período de prueba para usar esta función.")
+        
+        print(f"Acceso verificado para el usuario {user_id}. Estado de suscripción: {results[0].to_dict().get('status')}")
+
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        print(f"Error al verificar la suscripción para el usuario {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Ocurrió un error al verificar tu estado de suscripción.")
+
+# --- FIN DE LA MODIFICACIÓN ---
+
 
 def parse_and_add_markdown_to_docx(document, markdown_text):
     for line in markdown_text.strip().split('\n'):
@@ -103,7 +127,13 @@ async def analyze_documents(
     instructions: str = Form(...),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    print(f"Petición de análisis recibida del usuario UID: {current_user.get('uid')}")
+    user_id = current_user.get('uid')
+    print(f"Petición de análisis recibida del usuario UID: {user_id}")
+    
+    # --- INICIO DE LA MODIFICACIÓN: AÑADIR VERIFICACIÓN ---
+    verify_active_subscription(user_id)
+    # --- FIN DE LA MODIFICACIÓN ---
+    
     if len(files) > 3:
         raise HTTPException(status_code=400, detail="Se permite un máximo de 3 archivos.")
 
@@ -152,8 +182,6 @@ async def analyze_documents(
             if "content" in first_candidate and "parts" in first_candidate["content"]:
                 analysis_text = "".join(part.get("text", "") for part in first_candidate["content"]["parts"])
 
-                # --- INICIO MODIFICACIÓN: GUARDAR ANÁLISIS EN FIRESTORE ---
-                user_id = current_user.get("uid")
                 title = instructions[:40] + '...' if len(instructions) > 40 else instructions
                 doc_ref = db.collection("analysis_history").document()
                 doc_ref.set({
@@ -164,7 +192,6 @@ async def analyze_documents(
                     "timestamp": firestore.SERVER_TIMESTAMP,
                     "original_filenames": original_filenames
                 })
-                # --- FIN MODIFICACIÓN ---
                 
                 return {"analysis": analysis_text, "analysis_id": doc_ref.id}
 
@@ -178,11 +205,10 @@ async def analyze_documents(
         raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
 
 
-# --- INICIO MODIFICACIÓN: NUEVOS ENDPOINTS PARA EL HISTORIAL ---
-
 @app.get("/analysis-history/")
 async def get_analysis_history(current_user: Dict[str, Any] = Depends(get_current_user)):
     user_id = current_user.get("uid")
+    verify_active_subscription(user_id) # Verificación
     history_ref = db.collection("analysis_history").where("userId", "==", user_id).order_by("timestamp", direction=firestore.Query.DESCENDING)
     docs = history_ref.stream()
     history = []
@@ -198,6 +224,7 @@ async def get_analysis_history(current_user: Dict[str, Any] = Depends(get_curren
 @app.get("/analysis-history/{analysis_id}")
 async def get_analysis_detail(analysis_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     user_id = current_user.get("uid")
+    verify_active_subscription(user_id) # Verificación
     doc_ref = db.collection("analysis_history").document(analysis_id)
     doc = doc_ref.get()
 
@@ -213,6 +240,7 @@ async def get_analysis_detail(analysis_id: str, current_user: Dict[str, Any] = D
 @app.delete("/analysis-history/{analysis_id}")
 async def delete_analysis(analysis_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     user_id = current_user.get("uid")
+    verify_active_subscription(user_id) # Verificación
     doc_ref = db.collection("analysis_history").document(analysis_id)
     doc = doc_ref.get()
 
@@ -225,8 +253,6 @@ async def delete_analysis(analysis_id: str, current_user: Dict[str, Any] = Depen
     doc_ref.delete()
     return {"status": "ok", "message": "Análisis eliminado correctamente."}
 
-# --- FIN MODIFICACIÓN ---
-
 
 @app.post("/download-analysis")
 async def download_analysis(
@@ -235,7 +261,11 @@ async def download_analysis(
     file_format: str = Form("docx"),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    print(f"Petición de descarga recibida del usuario UID: {current_user.get('uid')}")
+    user_id = current_user.get('uid')
+    print(f"Petición de descarga recibida del usuario UID: {user_id}")
+    
+    verify_active_subscription(user_id) # Verificación
+
     try:
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         file_stream = io.BytesIO()
