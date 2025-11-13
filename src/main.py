@@ -2,7 +2,7 @@
 
 import os
 import base64
-import requests
+import httpx  # <--- MODIFICACIÓN: Importar httpx (reemplaza 'requests')
 import json
 import io
 import re
@@ -40,7 +40,7 @@ app = FastAPI(title="PIDA Document Analyzer API")
 
 # Se especifica el origen correcto para mayor seguridad.
 origins = [
-    "https://pida-ai.com"
+    "httpspida-ai.com"
 ]
 
 app.add_middleware(
@@ -178,10 +178,18 @@ async def analyze_documents(
         "generationConfig": generation_config
     }
 
+    # --- INICIO DE LA MODIFICACIÓN (REEMPLAZO DE REQUESTS POR HTTPX) ---
     try:
         headers = {"Content-Type": "application/json"}
-        response = requests.post(GEMINI_API_URL, headers=headers, data=json.dumps(request_payload))
-        response.raise_for_status()
+        
+        # Usamos un cliente asíncrono con un timeout (ej. 60 segundos)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                GEMINI_API_URL, 
+                headers=headers, 
+                json=request_payload  # httpx usa 'json=' para serializar automáticamente
+            )
+            response.raise_for_status() # Lanza error si la respuesta es 4xx o 5xx
 
         response_json = response.json()
         if "candidates" in response_json and response_json["candidates"]:
@@ -205,12 +213,13 @@ async def analyze_documents(
 
         raise HTTPException(status_code=500, detail=f"Respuesta inesperada de la API de Gemini: {response.text}")
 
-    except requests.exceptions.HTTPError as e:
+    except httpx.HTTPStatusError as e: # Capturamos errores HTTP de httpx
         raise HTTPException(status_code=e.response.status_code, detail=f"Error de la API de Gemini: {e.response.text}")
-    except requests.exceptions.RequestException as e:
+    except httpx.RequestError as e: # Capturamos errores de conexión/timeout de httpx
         raise HTTPException(status_code=502, detail=f"Error de conexión con la API de Gemini: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
+    # --- FIN DE LA MODIFICACIÓN ---
 
 
 @app.get("/analysis-history/")
