@@ -40,7 +40,7 @@ app = FastAPI(title="PIDA Document Analyzer API")
 
 # Se especifica el origen correcto para mayor seguridad.
 origins = [
-    "httpspida-ai.com"
+    "https://pida-ai.com"
 ]
 
 app.add_middleware(
