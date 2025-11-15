@@ -25,11 +25,14 @@ from src.core.prompts import ANALYZER_SYSTEM_PROMPT
 # Cargar variables de entorno
 load_dotenv()
 
+# --- CORRECCIÓN 1: Aplicar .strip() a las variables de entorno para evitar el error 500 (\n en URL) ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    GEMINI_API_KEY = GEMINI_API_KEY.strip()
 if not GEMINI_API_KEY:
     raise ValueError("No se encontró la variable de entorno GEMINI_API_KEY")
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
 # --- INICIO MODIFICACIÓN: INICIALIZAR FIRESTORE ---
@@ -39,6 +42,7 @@ db = firestore.Client()
 app = FastAPI(title="PIDA Document Analyzer API")
 
 # Se especifica el origen correcto para mayor seguridad.
+# --- CORRECCIÓN 2: El origen debe ser "https://pida-ai.com" ---
 origins = [
     "https://pida-ai.com"
 ]
