@@ -2,12 +2,16 @@
 
 import os
 import base64
-import httpx  # <--- MODIFICACIÓN: Importar httpx (reemplaza 'requests')
+import httpx
 import json
 import io
 import re
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
+# --- NUEVO: Importaciones necesarias para la nueva Middleware ---
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response as StarletteResponse
+# --- FIN NUEVO ---
 from typing import List, Dict, Any
 from dotenv import load_dotenv
 from docx import Document
@@ -15,9 +19,7 @@ from docx.shared import Pt
 from fpdf import FPDF
 from markdown_it import MarkdownIt
 from datetime import datetime
-# --- INICIO MODIFICACIÓN: AÑADIR LIBRERÍA FIRESTORE ---
 from google.cloud import firestore
-# --- FIN MODIFICACIÓN ---
 
 from src.core.security import get_current_user
 from src.core.prompts import ANALYZER_SYSTEM_PROMPT
@@ -35,13 +37,11 @@ if not GEMINI_API_KEY:
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
-# --- INICIO MODIFICACIÓN: INICIALIZAR FIRESTORE ---
+# Inicializar Firestore
 db = firestore.Client()
-# --- FIN MODIFICACIÓN ---
 
 app = FastAPI(title="PIDA Document Analyzer API")
 
-# Se especifica el origen correcto para mayor seguridad.
 # --- CORRECCIÓN 2: El origen debe ser "https://pida-ai.com" ---
 origins = [
     "https://pida-ai.com"
@@ -56,7 +56,20 @@ app.add_middleware(
     expose_headers=["Content-Disposition"],
 )
 
-# --- INICIO DE LA MODIFICACIÓN: FUNCIÓN DE VERIFICACIÓN DE SUSCRIPCIÓN ---
+# --- CORRECCIÓN 3: Middleware para corregir la cabecera Permissions-Policy ---
+class PermissionsPolicyMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response: StarletteResponse = await call_next(request)
+        # Se establece una política moderna y correcta para evitar la advertencia.
+        # Solo permite fullscreen y geolocation desde el propio origen ('self').
+        policy = "fullscreen=(self), geolocation=(self), microphone=(), camera=()"
+        
+        # Sobrescribir el encabezado.
+        response.headers["Permissions-Policy"] = policy
+        return response
+
+app.add_middleware(PermissionsPolicyMiddleware)
+# --- FIN CORRECCIÓN 3 ---
 
 def verify_active_subscription(current_user: Dict[str, Any]):
     """
@@ -88,9 +101,6 @@ def verify_active_subscription(current_user: Dict[str, Any]):
     except Exception as e:
         print(f"Error al verificar la suscripción para el usuario {user_id}: {e}")
         raise HTTPException(status_code=500, detail="Ocurrió un error al verificar tu estado de suscripción.")
-
-# --- FIN DE LA MODIFICACIÓN ---
-
 
 def parse_and_add_markdown_to_docx(document, markdown_text):
     for line in markdown_text.strip().split('\n'):
@@ -141,9 +151,7 @@ async def analyze_documents(
 ):
     print(f"Petición de análisis recibida del usuario UID: {current_user.get('uid')}")
     
-    # --- INICIO DE LA MODIFICACIÓN: AÑADIR VERIFICACIÓN ---
     verify_active_subscription(current_user)
-    # --- FIN DE LA MODIFICACIÓN ---
     
     if len(files) > 3:
         raise HTTPException(status_code=400, detail="Se permite un máximo de 3 archivos.")
@@ -182,18 +190,16 @@ async def analyze_documents(
         "generationConfig": generation_config
     }
 
-    # --- INICIO DE LA MODIFICACIÓN (REEMPLAZO DE REQUESTS POR HTTPX) ---
     try:
         headers = {"Content-Type": "application/json"}
         
-        # Usamos un cliente asíncrono con un timeout (ej. 60 segundos)
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
                 GEMINI_API_URL, 
                 headers=headers, 
-                json=request_payload  # httpx usa 'json=' para serializar automáticamente
+                json=request_payload
             )
-            response.raise_for_status() # Lanza error si la respuesta es 4xx o 5xx
+            response.raise_for_status()
 
         response_json = response.json()
         if "candidates" in response_json and response_json["candidates"]:
@@ -217,13 +223,12 @@ async def analyze_documents(
 
         raise HTTPException(status_code=500, detail=f"Respuesta inesperada de la API de Gemini: {response.text}")
 
-    except httpx.HTTPStatusError as e: # Capturamos errores HTTP de httpx
+    except httpx.HTTPStatusError as e:
         raise HTTPException(status_code=e.response.status_code, detail=f"Error de la API de Gemini: {e.response.text}")
-    except httpx.RequestError as e: # Capturamos errores de conexión/timeout de httpx
+    except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=f"Error de conexión con la API de Gemini: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
-    # --- FIN DE LA MODIFICACIÓN ---
 
 
 @app.get("/analysis-history/")
