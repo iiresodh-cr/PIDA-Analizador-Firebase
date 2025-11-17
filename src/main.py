@@ -193,7 +193,7 @@ async def analyze_documents(
     try:
         headers = {"Content-Type": "application/json"}
         
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             response = await client.post(
                 GEMINI_API_URL, 
                 headers=headers, 
